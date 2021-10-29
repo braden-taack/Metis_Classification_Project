@@ -48,48 +48,57 @@ The initial features for each player were: 'rating', 'game', 'last_rating_x', 'l
 Data cleaning begun with missing data. There were frequently missing data for the tactics, lessons, and puzzle related features because not all players attempted those challenges. Some players wanted to jump right into matches, or matches of a certain type. There were also less experienced players who had not attempted certain game types yet and therefore had no rating or wins/loss record. For features involving ratings, the Chess.com default of 1200 was assigned to missing values. For dates, wins, losses, tactics scores, lessons taken, and puzzle scores, 0 was assigned to missing values. Any remaining nulls were dropped. 
 
 There were also several features with date-based information. The API had formatted all date data in Epoch time. All Epoch times were reformatted to be datetime objects of YYYY/MM/DD HH/MM/SS format.  
-
-*Feature Engineering*
-1. Remove obvious duplicate columns, hour-of-the-day data, and gap data  
-  - Obvious duplicate columns included the driver number, which is a unique number to each driver. A Driver column was already incorporated so these were not necessary.  
-  - I was not interested in incorporating hour-of-the-day data because its likelihood to have a useful impact on the model was questionable. In each race, there would be the same hour-of-the-day for each finish position.  
-  - Gap data was not included either because it was already captured in the respective Time columns. 
-2. Drop columns based on VIF (variance inflation factor)
-  - 'Starting_grid_Time','Qualifying_Q3', and 'Qualifying_Pos' had huge VIF scores so were dropped. 
-3. Use a LASSO model to identify more features to be removed. 
-  - Despite some Time features with coefficients -> 0 from the LASSO model, all features were initially for alternate feature engineering.
-4. Attempt to normalize all time data when grouped by year and track
-  - The goal of this was to normalize the time data so it would more easily be compared from track to track.  
-  - While this resulted in a similar model score, it was actually *worse* than the raw linear regression model.
-5. Create dummy variables for Driver and Car
-  - Using the base Linear Regression model from model selection, Driver and Car (essentially team) were independently assigned dummy variables. 
-  - Using Driver dummy variables with an other category including drivers with less than 25 total races made the R^2 worse.
-  - Using Car (aka team) dummy variables with an other category including cars with less than 50 total races also made the R^2 worse.
-  - Neither categorical feature was included. 
-7. Add new interaction features
-  - 'P3_P2_delta', 'P2_P1_delta', 'Q2_Q1_delta' replaced the respective qualifying and practice lap times with the differences between laps. The goal of this was to judge based on improved performance from one practice to the next rather than just time. This marginally improved the R^2 so it was kept. 
-  - 'SG_Pos_Q_Laps' multiplied the starting grid position by the number of qualifying laps
-  - 'FL_avg_p_laps' multiplied the the fastest lap average speed by the total number of practice laps
-  - 'P3_Pos_P3_Laps', 'P2_Pos_P2_Laps', 'P1_Pos_P1_Laps' multiplied the number of practice laps by the practice position (ranking). These were not kept. 
-  - The goal of each of these interaction terms was to explore the saying: "Practice makes perfect". Theoretically, with more practice, the better the driver would perform during the actual race. These interaction terms did prove useful and increased R^2.
-
-*Model Selection*  
-4 models were tested for this project using cross validation methods via sklearn: Linear Regression, Lasso, Ridge regression, and 2nd degree polynomial. For every cross validation test, the overall data set was initially broken up into 80% train and 20% test data. The training data was then used to cross validate using the kfolds method with 5 folds and scoring based on R^2.  
   
-The results all had similar R2 values with the exception of the polynomial model which did worse. I selected the basic linear regression model based on the results in order to retain the features and maintain simplicity. 
-
+*Feature Engineering*  
+  
+1. Dropped columns time_per_move, username, and move accuracy. 
+    - time_per_move had very few observations
+    - username as a categorical variable would have generated about 13,000 new feature columns after creating dummy variables. Since dataset was ~30,000 rows, this was left out. 
+    - move accuracy would have been a cool metric to work with, but could not be used for predictability since it would only be known after the game occurs. 
+3. Make dummy variables for columns 'rated','rules','game'.
+    - Ideally, these would have helped the model find interactions among players and game types or time classes. 
+    - These were not included as they did not perform well with the logistic regression model.
+5. Player Win Percentage
+    - Wins, Loss, and Draw were included in original features
+    - Win/ (Win+Loss+Draw) was calculated for all players
+    - Win percentage out performed the individual columns so they were dropped. 
+    - This was intended to help standardize the metrics for the win loss record among all players. 
+7. Days Since Best Rating
+    - Calculated the difference (in days) of the date of the last rating and date of best rating
+    - Since this was not a multiplicative feature, used to replace the individual features
+    - Used to give an indication of how close the player is to their best performance level
+  
+*Model Selection*  
+  
+Initially, there was a significant issue with being able to handle a class imbalance on the draw class. The draw class made up only about ~6% of the modeling dataset. On initial modeling attempts with 5 different models (KNN, LOG, RF, DT, and XGBoost), the average accuracy for draw prediction was only 0.03%.  
+  
+Multiple attempts to correct the class imbalance were run with KNN, RF, and LOG REG models. Oversampling via the RandomOverSampler and SMOTE algorythms from imblearn were used. Changing the class weights was also attempted. While there was a minor increase in correctly predicted draws, there was a decline in overall accuracy and F1 score. Specifcally, the RF model and KNN model were overfitting with oversampling, and underfitting (underperforming) with class weight adjustments. As expected, the logistic model had little to no ability to predict the draw class at all. In order to simplify my problem, I decided to use just win and loss as classes for now to make the problem binary. I also made this choice to use a logistic regression model for easily interpretable results and to ensure my model would be scalable to larger datasets in the future.  
+  
+Before settling on logistic reggression, I also tested 4 other models using only rating as the 2 features: KNN, RF, DT, and XGBoost. I tested these by writing a function to automatically perform a grid search with 5 cross validation folds given a model, param_grid, and X_train and y_train data. The funciton would output the best parameters, score, score with a validation set, F1 score with the validation set, and a seaborn heatmap of the confusion matrix on the validation data.  
+  Model|Param_Grid Hyperparameter|Accuracy|F1 Score
+  -----|-------------------------|--------|--------
+  KNN|n_neighbors|0.69|0.69
+  RF|n_estimators|0.66|0.66
+  DT|n_estimators|0.65|0.65
+  XGB(no grid search)||0.58|0.65
+  LOGREG|C|0.70|0.70
+  
+From the results, I settled on logistic regression and spent some additional time tuning hyperparamters with the grid search method. I tested this time with a wider range of C's, different solvers, new features, and differnt cost metrics. 
+  
 #### Tools
 
-- [Formula 1 website](https://www.formula1.com/en/results.html/2021/races.html) for data source using Selenium and BeautifulSoup
+- [Chess.com API](https://www.chess.com/news/view/published-data-api) as data source 
+- MongoDB for local storage 
 - Pandas for data ingestion and basic exploration
 - Numpy and Pandas for data manipulation
-- datetime for cleaning lap time data
+- datetime for formatting time-based data
 - sklearn for model preprocessing, cross validation, model selection, and final model training and testing
-- Matplotlib and Seaborn for plotting
+- Seaborn for data visualization
+- imblearn for class imbalances
 
 #### Conclusions  
   
-My final model consisted of a Linear Regression model with the following features and coefficients. The R^2 was 0.684 and the MAE was 2.187.
+My final model consisted of a Logisitic Regression model with the following features and coefficients. The accuracy was 0.703 and the F1 score was 0.73.
   
   Intercept|-9.764
   ---------|------  
